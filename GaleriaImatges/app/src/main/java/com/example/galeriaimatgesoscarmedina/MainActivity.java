@@ -1,32 +1,53 @@
 package com.example.galeriaimatgesoscarmedina;
 
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.icu.text.SimpleDateFormat;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
+import android.graphics.Bitmap;
+import android.os.Environment;
+import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
+import android.Manifest;
+import java.io.File;
+import java.io.IOException;
+import java.util.Date;
 
 public class MainActivity extends AppCompatActivity {
 
-    private Button button;
+    private Button galleryButton;
+    private Button cameraButton;
+    private Button fullSizeButton;
     private ImageView image;
+    private ActivityResultLauncher<Uri> takePictureLauncher;
+    private ActivityResultLauncher<String> requestCameraPermissionLauncher;
     private ActivityResultLauncher<Intent> galleryLauncher;
+    private ActivityResultLauncher<Void> cameraLauncher;
     private static final int REQUEST_IMAGE_CAPTURE = 1;
+    private Uri fullSizeURI;
+    private String currentPhotoPath;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        button = findViewById(R.id.choseButton);
-        image = findViewById(R.id.imageView);
+        galleryButton = findViewById(R.id.galleryButton);
+        cameraButton = findViewById(R.id.cameraButton);
+        fullSizeButton = findViewById(R.id.fullSizeButon);
+        image = findViewById(R.id.image);
 
-        button.setOnClickListener(new View.OnClickListener() {
+        galleryButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 Intent galleryIntent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
@@ -34,61 +55,105 @@ public class MainActivity extends AppCompatActivity {
                 galleryLauncher.launch(galleryIntent);
             }
         });
+        cameraButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                cameraLauncher.launch(null);
+            }
+        });
+        fullSizeButton.setOnClickListener(new View.OnClickL istener() {
+            @Override
+            public void onClick(View v) {
+                if (ContextCompat.checkSelfPermission(
+                        MainActivity.this,
+                        Manifest.permission.CAMERA
+                ) != PackageManager.PERMISSION_GRANTED) {
+                    requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA);
+                } else {
+                    launchCamera();
+                }
+            }
+        });
 
 
         //Luncher
         galleryLauncher = registerForActivityResult(
-            new ActivityResultContracts.StartActivityForResult(),
-            result -> {
-                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                    Uri selectedImageUri = result.getData().getData();
-                    if (selectedImageUri != null) {
-                        image.setImageURI(selectedImageUri);
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                        Uri selectedImageUri = result.getData().getData();
+                        if (selectedImageUri != null) {
+                            image.setImageURI(selectedImageUri);
+                        }
                     }
                 }
-            }
+        );
+
+        cameraLauncher = registerForActivityResult(
+                new ActivityResultContracts.TakePicturePreview(),
+                new androidx.activity.result.ActivityResultCallback<Bitmap>() {
+                    @Override
+                    public void onActivityResult(Bitmap result) {
+                        if (result != null) {
+                            image.setImageBitmap(result);
+                        }
+                    }
+                }
+        );
+
+        requestCameraPermissionLauncher = registerForActivityResult(
+                new ActivityResultContracts.RequestPermission(),
+                isGranted -> {
+                    if (isGranted) {
+                        launchCamera();
+                    } else {
+                        // Handle permission denied
+                        Toast.makeText(this, "Camera permission is required", Toast.LENGTH_SHORT).show();
+                    }
+                }
+        );
+
+        takePictureLauncher = registerForActivityResult(
+                new ActivityResultContracts.TakePicture(),
+                new ActivityResultCallback<Boolean>() {
+                    @Override
+                    public void onActivityResult(Boolean success) {
+                        if (success) {
+                            // Photo was successfully taken
+                            image.setImageURI(fullSizeURI);
+                        } else {
+                            // Photo capture failed
+                            Toast.makeText(MainActivity.this, "Photo capture failed", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                }
         );
     }
 
-    
-    private void openCamera() {
-        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-
-        // Assegura't que hi ha una aplicació de càmera disponible
-        if (cameraIntent.resolveActivity(getPackageManager()) != null) {
-            // Crear un fitxer per guardar la imatge
-            File photoFile = createImageFile();
-            if (photoFile != null) {
-                // Obtenir l'Uri del fitxer amb FileProvider
-                photoUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", photoFile);
-
-                // Passar l'Uri a la càmera
-                cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoUri);
-                startActivityForResult(cameraIntent, REQUEST_IMAGE_CAPTURE);
-            }
-        }
-    }
-
-    private File createImageFile() {
+    private void launchCamera() {
         try {
-            // Crear un nom únic per al fitxer
-            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-            String imageFileName = "JPEG_" + timestamp + "_";
-            File storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
-            return File.createTempFile(imageFileName, ".jpg", storageDir);
-        } catch (IOException e) {
-            e.printStackTrace();
-            return null;
+            fullSizeURI = createImageFile();
+            takePictureLauncher.launch(fullSizeURI);
+        } catch (IOException ex) {
+            // Handle file creation error
+            Toast.makeText(this, "Could not create file for photo", Toast.LENGTH_SHORT).show();
         }
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
+    private Uri createImageFile() throws IOException {
+        // Create an image file name
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        String imageFileName = "JPEG_" + timeStamp + "_";
+        File storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+        File image = File.createTempFile(
+                imageFileName,  /* prefix */
+                ".jpg",         /* suffix */
+                storageDir      /* directory */
+        );
 
-        if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
-            ImageView imageView = findViewById(R.id.imageView);
-            imageView.setImageURI(photoUri); // Mostrar la imatge al ImageView
-        }
+        // Create Uri using FileProvider for Android 7.0+
+        return FileProvider.getUriForFile(this,
+                getPackageName() + ".fileprovider",
+                image);
     }
 }
